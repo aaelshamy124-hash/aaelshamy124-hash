@@ -1,0 +1,486 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Pillar 0: Default-deny global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Boot-time connection probe helper (existence check only, no data stored)
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+      allow list, create, update, delete: if false;
+    }
+
+    // Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isEmailVerified() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'aaelshamy124@gmail.com'
+      );
+    }
+
+    function isValidStringList(val, maxItems, maxItemLen) {
+      return val is list &&
+        val.size() <= maxItems &&
+        (val.size() == 0 || (val[0] is string && val[0].size() <= maxItemLen));
+    }
+
+    // Validation Helpers (Standalone Blueprints matching firebase-blueprint.json)
+    function isValidUserPublic(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'role', 'photoUrl', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role is string && data.role in ['USER', 'ADMIN'] &&
+        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 512)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'email', 'officialCompanyDomain', 'officialCompanyName',
+          'officialCompanyWebsite', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'email', 'officialCompanyDomain', 'officialCompanyName',
+          'officialCompanyWebsite', 'migratedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.ownerUid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.officialCompanyDomain is string && data.officialCompanyDomain.size() >= 1 && data.officialCompanyDomain.size() <= 253 &&
+        data.officialCompanyName is string && data.officialCompanyName.size() >= 1 && data.officialCompanyName.size() <= 160 &&
+        data.officialCompanyWebsite is string && data.officialCompanyWebsite.size() >= 1 && data.officialCompanyWebsite.size() <= 512 &&
+        (!('migratedAt' in data) || (data.migratedAt is string && data.migratedAt.size() <= 40)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLeadEntity(data) {
+      return data.keys().hasAll([
+          'leadId', 'ownerUid', 'companyName', 'normalizedCompanyName', 'country', 'countryCode',
+          'officialWebsite', 'normalizedDomain', 'email', 'emailNormalized', 'emailVerificationStatus',
+          'leadQualityScore', 'leadQualityGrade', 'verificationStatus', 'verificationDate',
+          'sourceUrls', 'productCategories', 'isAiDiscovered', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'leadId', 'ownerUid', 'companyName', 'normalizedCompanyName', 'country', 'countryCode',
+          'city', 'address', 'businessType', 'officialWebsite', 'normalizedDomain',
+          'email', 'emailNormalized', 'emailVerificationStatus', 'emailVerificationReason',
+          'phone', 'contactPerson', 'contactJobTitle', 'leadQualityScore', 'leadQualityGrade',
+          'verificationStatus', 'verificationDate', 'sourceEvidence', 'sourceUrls',
+          'productCategories', 'isAiDiscovered', 'mxVerified', 'mxHosts', 'notes',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.leadId) &&
+        isValidId(data.ownerUid) &&
+        data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 200 &&
+        data.normalizedCompanyName is string && data.normalizedCompanyName.size() <= 200 &&
+        data.country is string && data.country.size() >= 1 && data.country.size() <= 100 &&
+        data.countryCode is string && data.countryCode.size() >= 1 && data.countryCode.size() <= 10 &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 120)) &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 400)) &&
+        (!('businessType' in data) || (data.businessType is string && data.businessType.size() <= 120)) &&
+        data.officialWebsite is string && data.officialWebsite.size() <= 512 &&
+        data.normalizedDomain is string && data.normalizedDomain.size() <= 253 &&
+        data.email is string && data.email.size() <= 320 &&
+        data.emailNormalized is string && data.emailNormalized.size() <= 320 &&
+        data.emailVerificationStatus is string &&
+        data.emailVerificationStatus in ['VERIFIED', 'LIKELY_VALID', 'UNVERIFIED', 'INVALID', 'NOT_FOUND'] &&
+        (!('emailVerificationReason' in data) || (data.emailVerificationReason is string && data.emailVerificationReason.size() <= 500)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 80)) &&
+        (!('contactPerson' in data) || (data.contactPerson is string && data.contactPerson.size() <= 160)) &&
+        (!('contactJobTitle' in data) || (data.contactJobTitle is string && data.contactJobTitle.size() <= 160)) &&
+        data.leadQualityScore is number && data.leadQualityScore >= 0 && data.leadQualityScore <= 100 &&
+        data.leadQualityGrade is string && data.leadQualityGrade in ['EXCELLENT', 'VERY GOOD', 'GOOD', 'MEDIUM', 'LOW'] &&
+        data.verificationStatus is string &&
+        data.verificationStatus in ['NEW', 'VERIFIED', 'PARTIALLY_VERIFIED', 'NEEDS_REVIEW', 'DUPLICATE', 'REJECTED', 'ARCHIVED'] &&
+        data.verificationDate is string && data.verificationDate.size() <= 32 &&
+        (!('sourceEvidence' in data) || (data.sourceEvidence is string && data.sourceEvidence.size() <= 1000)) &&
+        isValidStringList(data.sourceUrls, 20, 512) &&
+        isValidStringList(data.productCategories, 30, 120) &&
+        data.isAiDiscovered is bool &&
+        (!('mxVerified' in data) || data.mxVerified is bool) &&
+        (!('mxHosts' in data) || isValidStringList(data.mxHosts, 15, 253)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCrmBuyer(data) {
+      return data.keys().hasAll([
+          'buyerId', 'ownerUid', 'name', 'country', 'website', 'email',
+          'status', 'emailsSentCount', 'aiScore', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'buyerId', 'ownerUid', 'name', 'country', 'city', 'website', 'email',
+          'procurementEmail', 'phone', 'purchasingManager', 'procurementRole',
+          'importerType', 'companySize', 'aiScore', 'status', 'notes', 'lastContactDate',
+          'emailsSentCount', 'emailVerificationStatus', 'emailVerificationSource',
+          'sourceUrls', 'requiredCrops', 'isAiDiscovered', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.buyerId) &&
+        isValidId(data.ownerUid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+        data.country is string && data.country.size() >= 1 && data.country.size() <= 100 &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 120)) &&
+        data.website is string && data.website.size() <= 512 &&
+        data.email is string && data.email.size() <= 320 &&
+        (!('procurementEmail' in data) || (data.procurementEmail is string && data.procurementEmail.size() <= 320)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 80)) &&
+        (!('purchasingManager' in data) || (data.purchasingManager is string && data.purchasingManager.size() <= 160)) &&
+        (!('procurementRole' in data) || (data.procurementRole is string && data.procurementRole.size() <= 160)) &&
+        (!('importerType' in data) || (data.importerType is string && data.importerType.size() <= 120)) &&
+        (!('companySize' in data) || (data.companySize is string && data.companySize in ['Small', 'Medium', 'Large'])) &&
+        data.aiScore is number && data.aiScore >= 0 && data.aiScore <= 100 &&
+        data.status is string &&
+        data.status in ['New Lead', 'Contacted', 'Negotiation', 'Quotation', 'Sample Sent', 'Waiting', 'Won', 'Lost'] &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
+        (!('lastContactDate' in data) || (data.lastContactDate is string && data.lastContactDate.size() <= 32)) &&
+        data.emailsSentCount is number && data.emailsSentCount >= 0 && data.emailsSentCount <= 10000 &&
+        (!('emailVerificationStatus' in data) || (data.emailVerificationStatus is string && data.emailVerificationStatus.size() <= 80)) &&
+        (!('emailVerificationSource' in data) || (data.emailVerificationSource is string && data.emailVerificationSource.size() <= 500)) &&
+        (!('sourceUrls' in data) || isValidStringList(data.sourceUrls, 20, 512)) &&
+        (!('requiredCrops' in data) || isValidStringList(data.requiredCrops, 25, 120)) &&
+        (!('isAiDiscovered' in data) || data.isAiDiscovered is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidExportProduct(data) {
+      return data.keys().hasAll([
+          'productId', 'ownerUid', 'name', 'code', 'category',
+          'seasonStart', 'seasonEnd', 'targetTemp', 'description', 'hsCode',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'productId', 'ownerUid', 'name', 'code', 'category',
+          'seasonStart', 'seasonEnd', 'targetTemp', 'description', 'hsCode',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.productId) &&
+        isValidId(data.ownerUid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 40 &&
+        data.category is string && data.category in ['Fruit', 'Vegetable', 'Mixed'] &&
+        data.seasonStart is string && data.seasonStart.size() <= 40 &&
+        data.seasonEnd is string && data.seasonEnd.size() <= 40 &&
+        data.targetTemp is string && data.targetTemp.size() <= 40 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.hsCode is string && data.hsCode.size() <= 32 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidExportSupplier(data) {
+      return data.keys().hasAll([
+          'supplierId', 'ownerUid', 'name', 'type', 'location',
+          'rating', 'certificates', 'productsSourced', 'contactPerson', 'phone',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'supplierId', 'ownerUid', 'name', 'type', 'location',
+          'rating', 'certificates', 'productsSourced', 'contactPerson', 'phone',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.supplierId) &&
+        isValidId(data.ownerUid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.type is string && data.type in ['Farm', 'Packaging', 'Logistics'] &&
+        data.location is string && data.location.size() <= 160 &&
+        data.rating is number && data.rating >= 0 && data.rating <= 5 &&
+        isValidStringList(data.certificates, 20, 120) &&
+        isValidStringList(data.productsSourced, 30, 120) &&
+        data.contactPerson is string && data.contactPerson.size() <= 160 &&
+        data.phone is string && data.phone.size() <= 80 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 1. Admins collection (server-managed only)
+    match /admins/{uid} {
+      allow get: if isEmailVerified() && isValidId(uid) && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+
+    // 2. Public User Profile + Owner-Isolated Subcollections
+    match /users/{userId} {
+      allow get: if isEmailVerified() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if false;
+
+      allow create: if isEmailVerified() &&
+        isValidId(userId) &&
+        isValidUserPublic(incoming()) &&
+        request.auth.uid == userId &&
+        incoming().uid == request.auth.uid &&
+        incoming().role == 'USER' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isEmailVerified() &&
+        isValidId(userId) &&
+        isValidUserPublic(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == userId &&
+            incoming().role == existing().role &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoUrl', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isAdmin() && isValidId(userId);
+
+      // Private PII & Exporter Domain Config (Split Collection Strategy + Master Gate)
+      match /private/{docId} {
+        allow get: if isEmailVerified() &&
+          isValidId(userId) && isValidId(docId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+
+        allow list: if isEmailVerified() &&
+          existing().ownerUid == request.auth.uid &&
+          userId == request.auth.uid;
+
+        allow create: if isEmailVerified() &&
+          isValidId(userId) && isValidId(docId) &&
+          isValidUserPrivate(incoming()) &&
+          request.auth.uid == userId &&
+          incoming().ownerUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isEmailVerified() &&
+          isValidId(userId) && isValidId(docId) &&
+          isValidUserPrivate(incoming()) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId &&
+          (
+            isAdmin() ||
+            (
+              request.auth.uid == userId &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'officialCompanyDomain', 'officialCompanyName', 'officialCompanyWebsite', 'migratedAt', 'updatedAt'
+              ])
+            )
+          );
+
+        allow delete: if isEmailVerified() && isValidId(userId) && isValidId(docId) &&
+          (request.auth.uid == userId || isAdmin());
+      }
+
+      // User Export Products Subcollection
+      match /products/{productId} {
+        allow get: if isEmailVerified() &&
+          isValidId(userId) && isValidId(productId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+
+        allow list: if isEmailVerified() &&
+          existing().ownerUid == request.auth.uid &&
+          userId == request.auth.uid;
+
+        allow create: if isEmailVerified() &&
+          isValidId(userId) && isValidId(productId) &&
+          isValidExportProduct(incoming()) &&
+          request.auth.uid == userId &&
+          incoming().ownerUid == request.auth.uid &&
+          incoming().productId == productId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isEmailVerified() &&
+          isValidId(userId) && isValidId(productId) &&
+          isValidExportProduct(incoming()) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().productId == existing().productId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId &&
+          (
+            isAdmin() ||
+            (
+              request.auth.uid == userId &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'code', 'category', 'seasonStart', 'seasonEnd', 'targetTemp', 'description', 'hsCode', 'updatedAt'
+              ])
+            )
+          );
+
+        allow delete: if isEmailVerified() && isValidId(userId) && isValidId(productId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+      }
+
+      // User Export Suppliers Subcollection
+      match /suppliers/{supplierId} {
+        allow get: if isEmailVerified() &&
+          isValidId(userId) && isValidId(supplierId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+
+        allow list: if isEmailVerified() &&
+          existing().ownerUid == request.auth.uid &&
+          userId == request.auth.uid;
+
+        allow create: if isEmailVerified() &&
+          isValidId(userId) && isValidId(supplierId) &&
+          isValidExportSupplier(incoming()) &&
+          request.auth.uid == userId &&
+          incoming().ownerUid == request.auth.uid &&
+          incoming().supplierId == supplierId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isEmailVerified() &&
+          isValidId(userId) && isValidId(supplierId) &&
+          isValidExportSupplier(incoming()) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().supplierId == existing().supplierId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId &&
+          (
+            isAdmin() ||
+            (
+              request.auth.uid == userId &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'type', 'location', 'rating', 'certificates', 'productsSourced', 'contactPerson', 'phone', 'updatedAt'
+              ])
+            )
+          );
+
+        allow delete: if isEmailVerified() && isValidId(userId) && isValidId(supplierId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+      }
+    }
+
+    // 3. Lead Intelligence Records (Owner-scoped with strict schema + Action-based updates)
+    match /leads/{leadId} {
+      allow get: if isEmailVerified() && isValidId(leadId) &&
+        (existing().ownerUid == request.auth.uid || isAdmin());
+
+      allow list: if isEmailVerified() && existing().ownerUid == request.auth.uid;
+
+      allow create: if isEmailVerified() &&
+        isValidId(leadId) &&
+        isValidLeadEntity(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isEmailVerified() &&
+        isValidId(leadId) &&
+        isValidLeadEntity(incoming()) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().leadId == existing().leadId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            existing().ownerUid == request.auth.uid &&
+            existing().verificationStatus != 'ARCHIVED' &&
+            (
+              // Action 1: Re-verify email & MX diagnostics
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'email', 'emailNormalized', 'emailVerificationStatus', 'emailVerificationReason',
+                'verificationStatus', 'verificationDate', 'leadQualityScore', 'leadQualityGrade',
+                'mxVerified', 'mxHosts', 'sourceUrls', 'sourceEvidence', 'updatedAt'
+              ]) ||
+              // Action 2: Edit workspace notes & contact metadata
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'notes', 'contactPerson', 'contactJobTitle', 'phone', 'productCategories', 'updatedAt'
+              ]) ||
+              // Action 3: Update company profile & website metadata
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'companyName', 'normalizedCompanyName', 'country', 'countryCode', 'city',
+                'address', 'businessType', 'officialWebsite', 'normalizedDomain', 'updatedAt'
+              ])
+            )
+          )
+        );
+
+      allow delete: if isEmailVerified() && isValidId(leadId) &&
+        (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    // 4. CRM Buyers Pipeline (Owner-scoped with terminal deal-stage lock)
+    match /crmBuyers/{buyerId} {
+      allow get: if isEmailVerified() && isValidId(buyerId) &&
+        (existing().ownerUid == request.auth.uid || isAdmin());
+
+      allow list: if isEmailVerified() && existing().ownerUid == request.auth.uid;
+
+      allow create: if isEmailVerified() &&
+        isValidId(buyerId) &&
+        isValidCrmBuyer(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isEmailVerified() &&
+        isValidId(buyerId) &&
+        isValidCrmBuyer(incoming()) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().buyerId == existing().buyerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            existing().ownerUid == request.auth.uid &&
+            (
+              // Action 1: Pipeline stage transition (locked once Won or Lost)
+              (!(existing().status in ['Won', 'Lost']) &&
+                incoming().diff(existing()).affectedKeys().hasOnly(['status', 'lastContactDate', 'updatedAt'])) ||
+              // Action 2: Update discussion notes
+              incoming().diff(existing()).affectedKeys().hasOnly(['notes', 'updatedAt']) ||
+              // Action 3: Log email outreach activity
+              incoming().diff(existing()).affectedKeys().hasOnly(['emailsSentCount', 'lastContactDate', 'notes', 'updatedAt']) ||
+              // Action 4: Refresh verified buyer contact intelligence
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'email', 'procurementEmail', 'phone', 'purchasingManager', 'procurementRole',
+                'website', 'emailVerificationStatus', 'emailVerificationSource', 'sourceUrls',
+                'requiredCrops', 'updatedAt'
+              ])
+            )
+          )
+        );
+
+      allow delete: if isEmailVerified() && isValidId(buyerId) &&
+        (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+  }
+}

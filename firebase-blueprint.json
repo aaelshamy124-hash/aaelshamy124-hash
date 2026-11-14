@@ -1,0 +1,549 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Public workspace identity profile without sensitive PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["USER", "ADMIN"]
+        },
+        "photoUrl": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Owner-isolated PII and exporter domain settings.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 254
+        },
+        "officialCompanyDomain": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "officialCompanyName": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "officialCompanyWebsite": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "migratedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerUid",
+        "email",
+        "officialCompanyDomain",
+        "officialCompanyName",
+        "officialCompanyWebsite",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "LeadEntity": {
+      "title": "LeadEntity",
+      "description": "Verified or AI-discovered B2B buyer intelligence record scoped to workspace owner.",
+      "type": "object",
+      "properties": {
+        "leadId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "companyName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "normalizedCompanyName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "countryCode": {
+          "type": "string",
+          "maxLength": 10
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "businessType": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "officialWebsite": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "normalizedDomain": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 320
+        },
+        "emailNormalized": {
+          "type": "string",
+          "maxLength": 320
+        },
+        "emailVerificationStatus": {
+          "type": "string",
+          "enum": ["VERIFIED", "LIKELY_VALID", "UNVERIFIED", "INVALID", "NOT_FOUND"]
+        },
+        "emailVerificationReason": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "contactPerson": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "contactJobTitle": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "leadQualityScore": {
+          "type": "number"
+        },
+        "leadQualityGrade": {
+          "type": "string",
+          "enum": ["EXCELLENT", "VERY GOOD", "GOOD", "MEDIUM", "LOW"]
+        },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["NEW", "VERIFIED", "PARTIALLY_VERIFIED", "NEEDS_REVIEW", "DUPLICATE", "REJECTED", "ARCHIVED"]
+        },
+        "verificationDate": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "sourceEvidence": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "sourceUrls": {
+          "type": "array",
+          "description": "Up to 20 verified source URLs (strings up to 512 chars)."
+        },
+        "productCategories": {
+          "type": "array",
+          "description": "Up to 30 target product categories (strings up to 120 chars)."
+        },
+        "isAiDiscovered": {
+          "type": "boolean"
+        },
+        "mxVerified": {
+          "type": "boolean"
+        },
+        "mxHosts": {
+          "type": "array",
+          "description": "Up to 15 MX hostnames (strings up to 253 chars)."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "leadId",
+        "ownerUid",
+        "companyName",
+        "normalizedCompanyName",
+        "country",
+        "countryCode",
+        "officialWebsite",
+        "normalizedDomain",
+        "email",
+        "emailNormalized",
+        "emailVerificationStatus",
+        "leadQualityScore",
+        "leadQualityGrade",
+        "verificationStatus",
+        "verificationDate",
+        "sourceUrls",
+        "productCategories",
+        "isAiDiscovered",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CrmBuyer": {
+      "title": "CrmBuyer",
+      "description": "CRM pipeline buyer account owned by a signed-in workspace user.",
+      "type": "object",
+      "properties": {
+        "buyerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "website": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 320
+        },
+        "procurementEmail": {
+          "type": "string",
+          "maxLength": 320
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "purchasingManager": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "procurementRole": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "importerType": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "companySize": {
+          "type": "string",
+          "enum": ["Small", "Medium", "Large"]
+        },
+        "aiScore": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["New Lead", "Contacted", "Negotiation", "Quotation", "Sample Sent", "Waiting", "Won", "Lost"]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "lastContactDate": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "emailsSentCount": {
+          "type": "number"
+        },
+        "emailVerificationStatus": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "emailVerificationSource": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "sourceUrls": {
+          "type": "array",
+          "description": "Up to 20 source URLs (strings up to 512 chars)."
+        },
+        "requiredCrops": {
+          "type": "array",
+          "description": "Up to 25 required crops (strings up to 120 chars)."
+        },
+        "isAiDiscovered": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "buyerId",
+        "ownerUid",
+        "name",
+        "country",
+        "website",
+        "email",
+        "status",
+        "emailsSentCount",
+        "aiScore",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ExportProduct": {
+      "title": "ExportProduct",
+      "description": "IQF or fresh produce catalog item managed by the workspace owner.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Fruit", "Vegetable", "Mixed"]
+        },
+        "seasonStart": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "seasonEnd": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "targetTemp": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "hsCode": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "productId",
+        "ownerUid",
+        "name",
+        "code",
+        "category",
+        "seasonStart",
+        "seasonEnd",
+        "targetTemp",
+        "description",
+        "hsCode",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ExportSupplier": {
+      "title": "ExportSupplier",
+      "description": "Farm, packaging, or cold-chain logistics supplier scoped to the workspace owner.",
+      "type": "object",
+      "properties": {
+        "supplierId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Farm", "Packaging", "Logistics"]
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "rating": {
+          "type": "number"
+        },
+        "certificates": {
+          "type": "array",
+          "description": "Up to 20 supplier certifications."
+        },
+        "productsSourced": {
+          "type": "array",
+          "description": "Up to 30 products sourced."
+        },
+        "contactPerson": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "supplierId",
+        "ownerUid",
+        "name",
+        "type",
+        "location",
+        "rating",
+        "certificates",
+        "productsSourced",
+        "contactPerson",
+        "phone",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminGrant": {
+      "title": "AdminGrant",
+      "description": "Server-managed administrator grant document.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 254
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "grantedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Public workspace user profile."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Owner-only PII and company domain configuration."
+    },
+    "/leads/{leadId}": {
+      "schema": { "$ref": "#/entities/LeadEntity" },
+      "description": "Owner-scoped verified and discovered B2B buyer leads."
+    },
+    "/crmBuyers/{buyerId}": {
+      "schema": { "$ref": "#/entities/CrmBuyer" },
+      "description": "Owner-scoped CRM pipeline buyer accounts."
+    },
+    "/users/{userId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/ExportProduct" },
+      "description": "Owner-scoped export product catalog."
+    },
+    "/users/{userId}/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/ExportSupplier" },
+      "description": "Owner-scoped supplier directory."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminGrant" },
+      "description": "Trusted administrator lookup collection."
+    }
+  }
+}
