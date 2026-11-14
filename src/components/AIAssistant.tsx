@@ -146,12 +146,8 @@ I operate under **17 Strict Verification Rules**:
     }
   };
 
-  // Run on mount with default leads
-  useEffect(() => {
-    if (verifiedLeads.length === 0) {
-      handleRunStrictLeadVerification();
-    }
-  }, []);
+  // Users trigger live strict verification explicitly via "Run Strict B2B Lead Verification" button
+  // so opening the tab does not consume Gemini quota unnecessarily.
 
   // Copy Markdown Table format matching the exact user specification:
   // | Company | Country | Contact Person | Position | Email | Verification Status | Source | Verification Date |

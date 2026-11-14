@@ -326,12 +326,12 @@ export default function MarketFinder({ products, countries, onAddProspect }: Mar
         setTimeout(() => setToastMessage(null), 4000);
       }
     } catch (err: any) {
-      console.error("Live Lead Hunt Error:", err);
-      setToastMessage(lang === "ar" 
+      const msg = err?.message || (lang === "ar"
         ? "تعذر الاتصال بخدمة الاكتشاف الحي، يرجى المحاولة مرة أخرى."
-        : "Failed to connect to live discovery service, please try again."
-      );
-      setTimeout(() => setToastMessage(null), 4000);
+        : "Failed to connect to live discovery service, please try again.");
+      setError(msg);
+      setToastMessage(msg);
+      setTimeout(() => setToastMessage(null), 5000);
     } finally {
       setHunting(false);
     }

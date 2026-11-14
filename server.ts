@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { VERIFIED_GLOBAL_BUYERS } from "./src/data/verifiedBuyers";
 
@@ -50,6 +50,167 @@ function extractBalancedJson<T = any>(rawText: string, expectArray = false): T |
   } catch {
     return null;
   }
+}
+
+function getGeminiErrorMeta(err: any): { code: number; status: string; message: string; isHardQuota: boolean } {
+  const rawMessage = String(err?.message || "");
+  let code = Number(err?.status || err?.code || 0);
+  let status = String(err?.statusText || "");
+  let message = rawMessage;
+
+  const jsonStart = rawMessage.indexOf("{");
+  if (jsonStart !== -1) {
+    try {
+      const parsed = JSON.parse(rawMessage.slice(jsonStart));
+      const inner = parsed?.error || parsed;
+      if (!code && inner?.code) code = Number(inner.code);
+      if (inner?.status) status = String(inner.status);
+      if (inner?.message) message = String(inner.message);
+    } catch {
+      // ignore non-JSON suffix
+    }
+  }
+
+  if (!code && (rawMessage.includes("429") || rawMessage.includes("RESOURCE_EXHAUSTED"))) code = 429;
+  if (!status && code === 429) status = "RESOURCE_EXHAUSTED";
+
+  const lowerMsg = message.toLowerCase();
+  const isHardQuota =
+    code === 429 &&
+    (lowerMsg.includes("exceeded your current quota") || lowerMsg.includes("limit: 0"));
+
+  return { code: code || 502, status, message, isHardQuota };
+}
+
+async function attemptSingleModel(
+  client: GoogleGenAI,
+  params: Parameters<GoogleGenAI["models"]["generateContent"]>[0],
+  maxRetries = 1
+) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await client.models.generateContent(params);
+    } catch (err: any) {
+      const meta = getGeminiErrorMeta(err);
+      const isTransient = (meta.code === 429 && !meta.isHardQuota) || meta.code === 503;
+      if (!isTransient || attempt >= maxRetries) {
+        throw err;
+      }
+      const delayMs = 800 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
+      attempt++;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+const tierCooldownUntil = new Map<string, number>();
+const COOLDOWN_MS = 60 * 1000;
+
+async function generateContentWithRetry(
+  client: GoogleGenAI,
+  params: Parameters<GoogleGenAI["models"]["generateContent"]>[0],
+  maxRetries = 1
+) {
+  const allCandidates: Array<Parameters<GoogleGenAI["models"]["generateContent"]>[0]> = [params];
+
+  const baseConfig = (params.config || {}) as Record<string, any>;
+  const hasTools = Array.isArray(baseConfig.tools) && baseConfig.tools.length > 0;
+  const { thinkingConfig, tools: _tools, ...restConfig } = baseConfig;
+  const nonSearchHydrogenConfig = thinkingConfig
+    ? { ...restConfig, thinkingConfig }
+    : Object.keys(restConfig).length
+    ? restConfig
+    : undefined;
+
+  if (params.model !== "gemini-3.1-flash-lite") {
+    allCandidates.push({
+      ...params,
+      model: "gemini-3.1-flash-lite",
+      config: hasTools ? { ...restConfig, tools: baseConfig.tools } : Object.keys(restConfig).length ? restConfig : undefined,
+    });
+  }
+
+  if (hasTools) {
+    allCandidates.push({
+      ...params,
+      model: "gemini-3.1-flash-lite",
+      config: Object.keys(restConfig).length ? restConfig : undefined,
+    });
+    allCandidates.push({
+      ...params,
+      config: nonSearchHydrogenConfig,
+    });
+  }
+
+  const now = Date.now();
+  const activeCandidates = allCandidates.filter((c) => {
+    const key = `${c.model}:${Boolean((c.config as any)?.tools?.length)}`;
+    return (tierCooldownUntil.get(key) || 0) <= now;
+  });
+  const candidates = activeCandidates.length > 0 ? activeCandidates : allCandidates;
+
+  let lastErr: any;
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    const isLast = i === candidates.length - 1;
+    const tierKey = `${candidate.model}:${Boolean((candidate.config as any)?.tools?.length)}`;
+
+    try {
+      return await attemptSingleModel(client, candidate, isLast ? maxRetries : 0);
+    } catch (err: any) {
+      lastErr = err;
+      const meta = getGeminiErrorMeta(err);
+      if (meta.code === 429) {
+        tierCooldownUntil.set(tierKey, Date.now() + COOLDOWN_MS);
+      }
+      if (meta.code !== 429 && meta.code !== 404 && meta.code !== 503) {
+        throw err;
+      }
+      console.warn(`[Gemini Fallback] ${tierKey} returned ${meta.code}; trying next tier.`);
+    }
+  }
+
+  throw lastErr;
+}
+
+function sendGeminiErrorResponse(res: express.Response, endpointLabel: string, err: any) {
+  const meta = getGeminiErrorMeta(err);
+
+  if (meta.code === 429 || meta.status === "RESOURCE_EXHAUSTED") {
+    console.warn(`[${endpointLabel}] Gemini quota/rate limit (429 RESOURCE_EXHAUSTED).`);
+    return res.status(429).json({
+      error: "Gemini API quota or rate limit exceeded",
+      code: 429,
+      status: "RESOURCE_EXHAUSTED",
+      details:
+        "Gemini API quota exceeded (429 RESOURCE_EXHAUSTED). Please wait briefly before retrying, or select a billing-enabled API key in Settings > Secrets.",
+    });
+  }
+
+  if (meta.code === 403 || meta.code === 400) {
+    console.warn(`[${endpointLabel}] Gemini key/config error (${meta.code}):`, meta.message);
+    return res.status(meta.code).json({
+      error: "Gemini API key or request configuration issue",
+      code: meta.code,
+      details: "Please check your GEMINI_API_KEY configuration in Settings > Secrets.",
+    });
+  }
+
+  if (meta.code === 404) {
+    console.warn(`[${endpointLabel}] Gemini model not found (404):`, meta.message);
+    return res.status(404).json({
+      error: "Gemini model unavailable",
+      code: 404,
+      details: meta.message || "Requested Gemini model could not be found.",
+    });
+  }
+
+  console.error(`[${endpointLabel}] error:`, err);
+  return res.status(502).json({
+    error: `${endpointLabel} failed`,
+    details: meta.message || "Gemini API error",
+  });
 }
 
 const app = express();
@@ -740,11 +901,12 @@ Return your response ONLY as a JSON object matching this schema:
 }
 Please generate 8-10 high-quality prospective B2B buyers in the "prospects" array. Ensure company and contact details are highly specialized for agricultural produce and frozen foods in ${country}.`;
 
-    const response = await aiClient.models.generateContent({
+    const response = await generateContentWithRetry(aiClient, {
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }]
+        tools: [{ googleSearch: {} }],
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       }
     });
 
@@ -809,11 +971,7 @@ Please generate 8-10 high-quality prospective B2B buyers in the "prospects" arra
       throw new Error("Empty or unparseable JSON response from Gemini.");
     }
   } catch (err: any) {
-    console.error("Gemini Market Finder error:", err);
-    return res.status(502).json({
-      error: "Live AI Market Finder request failed",
-      details: err?.message || "Gemini API error",
-    });
+    return sendGeminiErrorResponse(res, "Live AI Market Finder", err);
   }
 });
 
@@ -881,11 +1039,12 @@ Return ONLY a valid JSON array matching this schema:
   }
 ]`;
 
-      const response = await aiClient.models.generateContent({
+      const response = await generateContentWithRetry(aiClient, {
         model: GEMINI_MODEL,
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }],
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
       });
 
@@ -995,11 +1154,7 @@ Return ONLY a valid JSON array matching this schema:
 
       throw new Error("Could not parse structured leads from AI search response.");
     } catch (err: any) {
-      console.error("Live Lead Hunt error in Gemini:", err);
-      return res.status(502).json({
-        error: "Live AI lead hunt failed",
-        details: err?.message || "Gemini Search Grounding unavailable",
-      });
+      return sendGeminiErrorResponse(res, "Live AI Lead Hunt", err);
     }
   }
 
@@ -1136,7 +1291,7 @@ Draft a highly converting, formal, professional B2B cold sales pitch email to:
 - Call to Action: Offer to send specification sheets, price lists (FOB Alexandria or CFR to their local ports), or ship immediate free samples for testing.
 Include Galina's credentials (BRC, IFS, FDA, Halal). Keep the tone respectful, executive, persuasive, and completely professional.`;
 
-    const response = await aiClient.models.generateContent({
+    const response = await generateContentWithRetry(aiClient, {
       model: GEMINI_MODEL,
       contents: prompt
     });
@@ -1147,11 +1302,7 @@ Include Galina's credentials (BRC, IFS, FDA, Halal). Keep the tone respectful, e
     }
     return res.json({ email: text });
   } catch (err: any) {
-    console.error("Gemini Email Generator error:", err);
-    return res.status(502).json({
-      error: "AI email generation failed",
-      details: err?.message || "Gemini API error",
-    });
+    return sendGeminiErrorResponse(res, "AI Email Generator", err);
   }
 });
 
@@ -1184,7 +1335,7 @@ Text to translate:
 ${text}
 ---`;
 
-    const response = await aiClient.models.generateContent({
+    const response = await generateContentWithRetry(aiClient, {
       model: GEMINI_MODEL,
       contents: prompt
     });
@@ -1195,11 +1346,7 @@ ${text}
     }
     return res.json({ translatedText: translated });
   } catch (err: any) {
-    console.error("Gemini Translation error:", err);
-    return res.status(502).json({
-      error: "AI translation failed",
-      details: err?.message || "Gemini API error",
-    });
+    return sendGeminiErrorResponse(res, "AI Translation", err);
   }
 });
 
@@ -1240,7 +1387,7 @@ I am your rapid export advisor and international client verifier. I utilize real
   }
 
   try {
-    const response = await aiClient.models.generateContent({
+    const response = await generateContentWithRetry(aiClient, {
       model: GEMINI_MODEL,
       contents: formattedContents,
       config: {
@@ -1260,11 +1407,7 @@ I am your rapid export advisor and international client verifier. I utilize real
       sources: webSources.slice(0, 6)
     });
   } catch (err: any) {
-    console.error("Gemini Chat Assistant error:", err);
-    return res.status(502).json({
-      error: "AI Advisor request failed",
-      details: err?.message || "Gemini Search Grounding error",
-    });
+    return sendGeminiErrorResponse(res, "AI Export Advisor Chat", err);
   }
 });
 
@@ -1431,18 +1574,24 @@ Format your response strictly as valid JSON matching this structure:
   "conciseSummary": "Concise 2-sentence summary."
 }`;
 
-    const response = await aiClient.models.generateContent({
+    const response = await generateContentWithRetry(aiClient, {
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }]
+        tools: [{ googleSearch: {} }],
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       }
     });
 
     const webSources = extractGroundingSources(response);
     const parsedData = extractBalancedJson<any>(response.text || "", false);
 
-    if (parsedData && parsedData.companyName) {
+    if (
+      parsedData &&
+      parsedData.companyName &&
+      parsedData.companyName !== "Unverified" &&
+      !(lookupKey && parsedData.verificationStatus === "Unverified")
+    ) {
       const emailCandidate = parsedData.email?.value || "";
       const siteCandidate = parsedData.officialWebsite?.value || webSources[0]?.url || "";
       const techCheck = await verifyEmailTechnical(emailCandidate, {
@@ -1480,11 +1629,7 @@ Format your response strictly as valid JSON matching this structure:
     });
 
   } catch (err: any) {
-    console.error("Gemini Client Verification Error:", err);
-    return res.status(502).json({
-      error: "Live AI client verification failed",
-      details: err?.message || "Gemini Search Grounding error",
-    });
+    return sendGeminiErrorResponse(res, "Live AI Client Verification", err);
   }
 });
 
@@ -1684,11 +1829,12 @@ Return strictly a valid JSON array of objects conforming to:
   }
 ]`;
 
-      const response = await aiClient.models.generateContent({
+      const response = await generateContentWithRetry(aiClient, {
         model: GEMINI_MODEL,
         contents: prompt,
         config: {
-          tools: [{ googleSearch: {} }]
+          tools: [{ googleSearch: {} }],
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         }
       });
 
@@ -1738,11 +1884,7 @@ Return strictly a valid JSON array of objects conforming to:
 
       throw new Error("Could not parse verification JSON array from Gemini.");
     } catch (apiErr: any) {
-      console.error("AI lead verification call failed:", apiErr);
-      return res.status(502).json({
-        error: "Live AI email verification failed",
-        details: apiErr?.message || "Gemini Search Grounding error",
-      });
+      return sendGeminiErrorResponse(res, "Live AI Email Verification", apiErr);
     }
   }
 
